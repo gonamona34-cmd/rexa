@@ -3,6 +3,7 @@ import time
 import os
 import traceback
 import random
+from datetime import datetime
 
 # =========================
 # CONFIG
@@ -14,9 +15,12 @@ ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
 # STATE
 # =========================
 last_offset = None
-last_heartbeat = time.time()
-is_degraded = False
 
+# модулі heartbeat
+modules_heartbeat = {}
+MODULE_TIMEOUT = 60  # сек
+
+# статистика
 warnings_count = 0
 critical_count = 0
 
@@ -24,31 +28,24 @@ critical_count = 0
 # QUOTES
 # =========================
 QUOTES = [
-    "💡 Світ створюється діями, а не очікуванням.",
-    "⚡ Система росте там, де є рух.",
-    "🔥 Кожен збій — це крок до сили.",
-    "🌱 Маленькі рішення будують великі системи.",
-    "🚀 Контроль — це спокій у хаосі."
+    "🔥 Система росте через рух.",
+    "⚡ Контроль створює спокій.",
+    "🌱 Маленькі кроки формують силу.",
+    "🚀 Ядро тримає баланс.",
+    "💡 Світ стає яснішим через дію."
 ]
 
 # =========================
 # TELEGRAM
 # =========================
-def tg_send(text, reply_markup=None):
+def tg_send(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-    payload = {
+    requests.post(url, json={
         "chat_id": ADMIN_CHAT_ID,
-        "text": text
-    }
-
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
-
-    try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception as e:
-        print("Telegram error:", e)
+        "text": text,
+        "parse_mode": "HTML"
+    }, timeout=10)
 
 
 def get_updates(offset=None):
@@ -60,36 +57,19 @@ def get_updates(offset=None):
 
     return requests.get(url, params=params, timeout=30).json()
 
-
 # =========================
-# BUTTON
+# HEARTBEAT SYSTEM
 # =========================
-def get_keyboard():
-    return {
-        "keyboard": [
-            [{"text": "📊 Статус"}]
-        ],
-        "resize_keyboard": True
-    }
+def module_heartbeat(module_name):
+    modules_heartbeat[module_name] = time.time()
 
 
-# =========================
-# REPORT
-# =========================
-def send_status_report():
-    quote = random.choice(QUOTES)
+def check_modules():
+    now = time.time()
 
-    text = f"""
-📊 <b>ЗВІТ СИСТЕМИ</b>
-
-🟢 Heartbeat: активний
-⚠️ Warnings: {warnings_count}
-❗ Critical: {critical_count}
-
-{quote}
-"""
-
-    tg_send(text)
+    for module, last in modules_heartbeat.items():
+        if now - last > MODULE_TIMEOUT:
+            log_warning(f"Модуль {module} без heartbeat")
 
 
 # =========================
@@ -99,14 +79,48 @@ def log_warning(text):
     global warnings_count
     warnings_count += 1
 
-    tg_send(f"⚠️ WARNING\n\n{text}\n\n💡 {random.choice(QUOTES)}")
+    tg_send(f"⚠️ <b>WARNING</b>\n{text}\n\n💡 {random.choice(QUOTES)}")
 
 
 def log_critical(text):
     global critical_count
     critical_count += 1
 
-    tg_send(f"🔴 CRITICAL\n\n{text}\n\n🔥 {random.choice(QUOTES)}")
+    tg_send(f"🔴 <b>CRITICAL</b>\n{text}\n\n🔥 {random.choice(QUOTES)}")
+
+
+# =========================
+# REPORT
+# =========================
+def send_status():
+    quote = random.choice(QUOTES)
+
+    modules_status = ""
+
+    now = time.time()
+
+    for module, last in modules_heartbeat.items():
+        status = "🟢"
+        if now - last > MODULE_TIMEOUT:
+            status = "🔴"
+
+        modules_status += f"{status} {module}\n"
+
+    text = f"""
+📊 <b>СИСТЕМНИЙ ЗВІТ</b>
+
+⚡ Heartbeat системи: активний
+
+📦 Модулі:
+{modules_status}
+
+⚠️ Warnings: {warnings_count}
+❗ Critical: {critical_count}
+
+💡 <i>{quote}</i>
+"""
+
+    tg_send(text)
 
 
 # =========================
@@ -115,40 +129,21 @@ def log_critical(text):
 def handle_message(message):
     text = message.get("text", "")
 
-    # команда /status
-    if text == "/status" or text == "📊 Статус":
-        send_status_report()
+    if text == "/status":
+        send_status()
 
     elif text == "/ping":
         tg_send("🏓 pong")
 
-    elif text == "/start":
-        tg_send("🚀 Система активована", reply_markup=get_keyboard())
+    elif text.startswith("/hb"):
+        # /hb module_name
+        parts = text.split()
+        if len(parts) > 1:
+            module_heartbeat(parts[1])
+            tg_send(f"🟢 Heartbeat від {parts[1]}")
 
     else:
         tg_send(f"📩 {text}")
-
-
-# =========================
-# HEALTH
-# =========================
-def heartbeat():
-    global last_heartbeat, is_degraded
-
-    last_heartbeat = time.time()
-
-    if is_degraded:
-        tg_send("🟢 Система відновилась")
-        is_degraded = False
-
-
-def check_health():
-    global is_degraded
-
-    if time.time() - last_heartbeat > 60:
-        if not is_degraded:
-            tg_send("🔴 Втрата heartbeat")
-            is_degraded = True
 
 
 # =========================
@@ -157,7 +152,7 @@ def check_health():
 def main():
     global last_offset
 
-    tg_send("🚀 Ядро запущене")
+    tg_send("🚀 Ядро 2.0 запущене")
 
     while True:
         try:
@@ -169,15 +164,11 @@ def main():
                 if "message" in update:
                     handle_message(update["message"])
 
-            heartbeat()
-            check_health()
+            check_modules()
 
         except Exception:
             err = traceback.format_exc()
-
-            # трактуємо як critical
             log_critical(err)
-
             time.sleep(5)
 
         time.sleep(1)
