@@ -9,8 +9,8 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 # =========================
 # CONFIG (через env)
 # =========================
-BOT_TOKEN = os.getenv("8772435599:AAGR0vhjgaeTYZwK52OlYZPWbauQZ_n-WQE")
-ADMIN_CHAT_ID = int(os.getenv("822993796", "0"))
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
 
 REPORT_TIME = time(22, 0)  # 22:00
 
