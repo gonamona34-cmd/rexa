@@ -107,7 +107,7 @@ def send_status():
         modules_status += f"{status} {module}\n"
 
     text = f"""
-📊 <b>СИСТЕМНИЙ ЗВІТ</b>
+📊 СИСТЕМНИЙ ЗВІТ
 
 ⚡ Heartbeat системи: активний
 
