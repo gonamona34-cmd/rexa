@@ -1,93 +1,114 @@
+import requests
+import time
 import os
-import asyncio
-from datetime import datetime, time
-import random
-
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+import traceback
 
 # =========================
-# CONFIG (через env)
+# CONFIG
 # =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
 
-REPORT_TIME = time(22, 0)  # 22:00
+# =========================
+# STATE
+# =========================
+last_offset = None
+last_heartbeat = time.time()
+is_degraded = False
+
 
 # =========================
-# RANDOM PHRASES
+# TELEGRAM
 # =========================
-PHRASES = [
-    "🧘 Спокій приходить тоді, коли все має свій ритм",
-    "🌊 Потік рухається, навіть якщо ти цього не бачиш",
-    "🔥 Якщо є напруга — є і розвиток",
-    "⚡ Система стабільна — це теж форма сили",
-    "🌿 Маленькі процеси створюють великі результати",
-    "☯️ Баланс тримає систему в гармонії",
-    "🧠 Контроль — це уважність до моменту",
-    "🚀 Рух вперед — навіть у тиші",
-    "🌙 Ніч не зупиняє систему, а лише змінює ритм",
-    "🔁 Повторення створює стабільність",
-]
+def tg_send(text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    try:
+        requests.post(url, json={
+            "chat_id": ADMIN_CHAT_ID,
+            "text": text
+        }, timeout=10)
+    except Exception as e:
+        print("Telegram error:", e)
+
+
+def get_updates(offset=None):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+
+    params = {"timeout": 25}
+    if offset:
+        params["offset"] = offset
+
+    return requests.get(url, params=params, timeout=30).json()
+
 
 # =========================
-# CORE STATUS
+# LOGIC
 # =========================
-async def send_daily_report(app):
+def handle_message(message):
+    text = message.get("text", "")
+    chat_id = message["chat"]["id"]
+
+    if text == "/status":
+        tg_send("🟢 Ядро працює стабільно")
+
+    elif text == "/ping":
+        tg_send("🏓 pong")
+
+    else:
+        tg_send(f"📩 Отримано: {text}")
+
+
+# =========================
+# HEALTH
+# =========================
+def heartbeat():
+    global last_heartbeat, is_degraded
+
+    last_heartbeat = time.time()
+
+    if is_degraded:
+        tg_send("🟢 Система відновилась")
+        is_degraded = False
+
+
+def check_health():
+    global is_degraded
+
+    if time.time() - last_heartbeat > 60:
+        if not is_degraded:
+            tg_send("🔴 Втрата heartbeat")
+            is_degraded = True
+
+
+# =========================
+# MAIN LOOP
+# =========================
+def main():
+    global last_offset
+
+    tg_send("🚀 Ядро запущене")
+
     while True:
-        now = datetime.now()
-        target = datetime.combine(now.date(), REPORT_TIME)
+        try:
+            data = get_updates(last_offset)
 
-        if now > target:
-            target = datetime.combine(now.date(), REPORT_TIME)
-            target = target.replace(day=now.day + 1)
+            for update in data.get("result", []):
+                last_offset = update["update_id"] + 1
 
-        await asyncio.sleep((target - now).seconds)
+                if "message" in update:
+                    handle_message(update["message"])
 
-        phrase = random.choice(PHRASES)
+            heartbeat()
+            check_health()
 
-        text = (
-            "🟢 CORE STATUS: ALIVE\n"
-            f"⏰ Time: {datetime.now().strftime('%H:%M:%S')}\n\n"
-            f"{phrase}"
-        )
+        except Exception:
+            err = traceback.format_exc()
+            print(err)
+            tg_send(f"⚠️ Помилка:\n{err}")
+            time.sleep(5)
 
-        await app.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text)
-
-
-# =========================
-# COMMANDS
-# =========================
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "🟢 Ядро дихає стабільно\n"
-        f"⏰ Час: {datetime.now().strftime('%H:%M:%S')}\n"
-        "✨ Потік рівний і контроль збережено"
-    )
-    await update.message.reply_text(text)
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🚀 Ядро активне. Система під контролем.")
-
-
-# =========================
-# MAIN
-# =========================
-async def main():
-    app = Application.builder().token(BOT_TOKEN).build()
-
-    # handlers
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("status", status))
-
-    # запуск фонової задачі
-    asyncio.create_task(send_daily_report(app))
-
-    print("🟢 CORE STARTED")
-
-    await app.run_polling()
+        time.sleep(1)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
